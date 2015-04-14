@@ -17,7 +17,7 @@
  * REVISION HISTORY
  * Version 1.0 - February 15, 2014 - Bruce Lacey
  * Version 1.1 - August 13, 2014 - Converted to 1.4 (hek) 
- * Version 1.2 - April 13, 2014 - Added long dynamic and precise fade, also made fade non exclusive (ferpando)
+ * Version 1.2 - April 13, 2015 - Added long dynamic and precise fade, also made fade non exclusive (ferpando)
  ***/
  
  #include <Time.h> 
@@ -34,6 +34,7 @@ MySensor gw(9,10);
 
 static int currentLevel = 0;  // Current dim level...
 static int requestedLevel = 0;
+boolean preciseFade = false;
 
 MyMessage dimmerMsg(0, V_DIMMER);
 MyMessage lightMsg(0, V_LIGHT);
@@ -70,9 +71,12 @@ void loop()
 
 void incomingMessage(const MyMessage &message) {
   if (message.type == V_LIGHT || message.type == V_DIMMER) {
-    
+    int steps;
+    int multiplier;
     if(message.sensor == 100 ){ //fade special, addressed to node 100
       // Message payload: value to fade to, seconds to fade     example: "20,10"
+      preciseFade = true;
+      String msg=message.getString();
       
       int commaIndex = msg.indexOf(',');
 
@@ -80,16 +84,18 @@ void incomingMessage(const MyMessage &message) {
       String secondValue = msg.substring(commaIndex+1);
 
       requestedLevel=firstValue.toInt();
-      int steps=abs(currentLevel-requestedLevel);
-
+      steps = currentLevel-requestedLevel;
+      multiplier = abs(1000 / steps);
       if(commaIndex == -1){
-         FADE_DELAY=10;
+         FADE_DELAY=multiplier * 10;
       }else { 
-         FADE_DELAY = 1000* secondValue.toInt() / steps;
+         FADE_DELAY = multiplier * secondValue.toInt();
       }
     }else { //fade normal
-    
-          FADE_DELAY=10;
+          preciseFade = false;
+          steps = currentLevel-requestedLevel;
+          multiplier = abs(1000 / steps);
+          FADE_DELAY=multiplier * 10;
           //  Retrieve the power or dim level from the incoming request message
           requestedLevel = atoi( message.data );
           
@@ -101,18 +107,17 @@ void incomingMessage(const MyMessage &message) {
           requestedLevel = requestedLevel < 0   ? 0   : requestedLevel;
           
           }
-       
-      Serial.print( "Changing level to " );
-      Serial.print( requestedLevel );
-      Serial.print( ", from " ); 
-      Serial.println( currentLevel ); 
-       
-         
-      // Inform the gateway of the current DimmableLED's SwitchPower1 and LoadLevelStatus value...
-      gw.send(lightMsg.set(currentLevel > 0 ? 1 : 0));
-  
-      // hek comment: Is this really nessesary?
-      gw.send( dimmerMsg.set(currentLevel) );
+          
+    Serial.print( "Changing level to " );
+    Serial.print( requestedLevel );
+    Serial.print( ", from " ); 
+    Serial.println( currentLevel ); 
+     
+    // Inform the gateway of the current DimmableLED's SwitchPower1 and LoadLevelStatus value...
+    gw.send(lightMsg.set(requestedLevel > 0 ? 1 : 0));
+
+    // hek comment: Is this really nessesary?
+    gw.send( dimmerMsg.set(requestedLevel) );
     
     }
 }
@@ -121,16 +126,20 @@ void incomingMessage(const MyMessage &message) {
  *  This method provides a graceful fade up/down effect
  */
 void fadeToLevel() {
-
-  if ( currentLevel != requestedLevel ) {
-    int delta = ( requestedLevel - currentLevel ) < 0 ? -1 : 1;
   
+  if ( currentLevel != requestedLevel ) {
+    int pwmLevel;
+    int delta = ( requestedLevel - currentLevel ) < 0 ? -1 : 1;
     currentLevel += delta;
     Serial.print( "analog write: " );
-    Serial.println( currentLevel / 100. * 255 );
-    analogWrite( LED_PIN, (int)(currentLevel / 100. * 255) );
-    delay( FADE_DELAY );
+    if(preciseFade){ //set to specific number
+        pwmLevel = (int)currentLevel;
+        }else  { //set to 10% increment level
+           pwmLevel=(int)(currentLevel / 100. * 255);
+           }
+  Serial.println( pwmLevel );
+  analogWrite( LED_PIN, pwmLevel );
+  delay( FADE_DELAY );
   }
-  
 }
 
